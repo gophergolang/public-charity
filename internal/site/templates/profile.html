@@ -1,0 +1,63 @@
+{{define "content"}}
+<h1>{{.Username}}</h1>
+<p class="bio">{{.Bio}}</p>
+
+<div class="section">
+    <h2>Need Scores</h2>
+    <div class="score-grid">
+        {{range .ScoreList}}
+        <div class="score">
+            <div>
+                <div class="score-label">{{.Label}}</div>
+                <div class="score-bar"><div class="score-fill" style="width: {{.Percent}}%"></div></div>
+            </div>
+        </div>
+        {{end}}
+    </div>
+</div>
+
+{{if .Interests}}
+<div class="section">
+    <h2>Interests</h2>
+    <div class="tags">
+        {{range .Interests}}<span class="tag">{{.}}</span>{{end}}
+    </div>
+</div>
+{{end}}
+
+{{if .Offers}}
+<div class="section">
+    <h2>Offers</h2>
+    {{range .Offers}}
+    <div class="item">
+        <div class="cat">{{.Category}}</div>
+        <div>{{.Description}} {{if .Available}}<span class="badge">available</span>{{end}}</div>
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+{{if .Surplus}}
+<div class="section">
+    <h2>Surplus</h2>
+    {{range .Surplus}}
+    <div class="item">
+        <div class="cat">{{.Category}}</div>
+        <div>{{.Description}}{{if .Expires}} — expires {{.Expires}}{{end}}</div>
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+{{if .Timeline}}
+<div class="section">
+    <h2>Responsibilities Timeline</h2>
+    {{range .Timeline}}
+    <div class="item">
+        <div class="cat">{{.Category}} — {{.Day}} {{.Time}}</div>
+        <div>{{.Description}}</div>
+    </div>
+    {{end}}
+</div>
+{{end}}
+{{end}}
