@@ -1,5 +1,5 @@
-gateway
-auth
-agent
+/gateway
+/auth
+/agent
 /data/
 *.exe
