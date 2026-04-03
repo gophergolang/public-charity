@@ -1,114 +1,171 @@
+// Package bloom provides per-cell per-category bloom filters for the geographic grid.
+// Adapted from golangdaddy/tsdb's Period+BloomFilter pattern:
+// each grid cell embeds a bloom filter per need category for O(1) membership triage.
 package bloom
 
 import (
-	"hash"
+	"bytes"
+	"encoding/gob"
 	"hash/fnv"
-	"math"
 	"sync"
+
+	bloomfilter "github.com/bits-and-blooms/bloom/v3"
 
 	"github.com/gophergolang/public-charity/internal/manifest"
 	"github.com/gophergolang/public-charity/internal/storage"
 )
 
 const (
-	filterSize   = 1024 // bits
-	filterBytes  = filterSize / 8
-	numHashes    = 3
+	// Tuned for ~10,000 items per cell per category with 0.01% false positive rate.
+	// Same parameters used in golangdaddy/tsdb for high-throughput triage.
+	expectedItems    = 10000
+	falsePositiveRate = 0.0001
 )
 
-type Filter struct {
-	bits [filterBytes]byte
+// Cell mirrors tsdb's Period struct: a bloom filter + RWMutex protecting a single
+// grid cell + category combination. The bloom filter enables sub-microsecond triage
+// so the agent service can skip entire cells without reading any manifests.
+type Cell struct {
+	filter *bloomfilter.BloomFilter
+	sync.RWMutex
+	n int64 // occurrence counter (like tsdb's Period.n)
 }
 
-func (f *Filter) Add(item string) {
-	for _, idx := range hashPositions(item) {
-		f.bits[idx/8] |= 1 << (idx % 8)
+func newCell() *Cell {
+	return &Cell{
+		filter: bloomfilter.NewWithEstimates(expectedItems, falsePositiveRate),
 	}
 }
 
-func (f *Filter) MayContain(item string) bool {
-	for _, idx := range hashPositions(item) {
-		if f.bits[idx/8]&(1<<(idx%8)) == 0 {
-			return false
-		}
+// Add hashes the username with FNV-1a (same hash family as tsdb labels) and adds it.
+func (c *Cell) Add(username string) {
+	c.Lock()
+	defer c.Unlock()
+	c.filter.Add(fnvHash(username))
+	c.n++
+}
+
+// Test checks if the username might be in this cell (probabilistic).
+func (c *Cell) Test(username string) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.filter.Test(fnvHash(username))
+}
+
+// HasAny returns true if any items have been added.
+func (c *Cell) HasAny() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.n > 0
+}
+
+// Count returns the number of items added.
+func (c *Cell) Count() int64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.n
+}
+
+// Encode serializes the bloom filter using GOB (tsdb pattern: GOB for all persistence).
+func (c *Cell) Encode() ([]byte, error) {
+	c.RLock()
+	defer c.RUnlock()
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(c.n); err != nil {
+		return nil, err
 	}
-	return true
-}
-
-func (f *Filter) HasAny() bool {
-	for _, b := range f.bits {
-		if b != 0 {
-			return true
-		}
+	if err := enc.Encode(c.filter); err != nil {
+		return nil, err
 	}
-	return false
+	return buf.Bytes(), nil
 }
 
-func (f *Filter) Bytes() []byte {
-	out := make([]byte, filterBytes)
-	copy(out, f.bits[:])
-	return out
-}
-
-func FromBytes(data []byte) *Filter {
-	f := &Filter{}
-	copy(f.bits[:], data)
-	return f
-}
-
-func hashPositions(item string) []uint {
-	positions := make([]uint, numHashes)
-	var h hash.Hash64
-	for i := 0; i < numHashes; i++ {
-		h = fnv.New64a()
-		h.Write([]byte(item))
-		h.Write([]byte{byte(i)})
-		positions[i] = uint(h.Sum64() % filterSize)
+// Decode restores a cell from GOB bytes.
+func (c *Cell) Decode(data []byte) error {
+	c.Lock()
+	defer c.Unlock()
+	dec := gob.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(&c.n); err != nil {
+		return err
 	}
-	return positions
+	c.filter = &bloomfilter.BloomFilter{}
+	return dec.Decode(c.filter)
 }
 
-// Grid manages all bloom filters: one per cell per category.
+// fnvHash produces FNV-1a hash bytes for bloom filter insertion.
+// FNV-1a is the same hash family used throughout tsdb for labels and configs.
+func fnvHash(s string) []byte {
+	h := fnv.New64a()
+	h.Write([]byte(s))
+	b := h.Sum(nil)
+	return b
+}
+
+// Grid manages all bloom filters: one Cell per grid cell per category.
+// This is the top-level structure analogous to tsdb's Tree, holding the
+// full spatial index in memory.
 type Grid struct {
-	mu      sync.RWMutex
-	filters map[string]*Filter // key: "{cell_id}/{category}"
+	mu    sync.RWMutex
+	cells map[string]*Cell // key: "{cell_id}/{category}"
 }
 
 func NewGrid() *Grid {
 	return &Grid{
-		filters: make(map[string]*Filter),
+		cells: make(map[string]*Cell),
 	}
 }
 
-func key(cellID, category string) string {
+func cellKey(cellID, category string) string {
 	return cellID + "/" + category
 }
 
-func (g *Grid) Get(cellID, category string) *Filter {
+// getOrCreate lazily initializes cells on demand (tsdb pattern: lazy period creation).
+func (g *Grid) getOrCreate(cellID, category string) *Cell {
+	k := cellKey(cellID, category)
 	g.mu.RLock()
-	defer g.mu.RUnlock()
-	if f, ok := g.filters[key(cellID, category)]; ok {
-		return f
+	c, ok := g.cells[k]
+	g.mu.RUnlock()
+	if ok {
+		return c
 	}
-	return &Filter{}
-}
 
-func (g *Grid) HasUsers(cellID, category string) bool {
-	return g.Get(cellID, category).HasAny()
-}
-
-func (g *Grid) AddUser(cellID, category, username string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	k := key(cellID, category)
-	f, ok := g.filters[k]
-	if !ok {
-		f = &Filter{}
-		g.filters[k] = f
+	// Double-check after write lock
+	if c, ok = g.cells[k]; ok {
+		return c
 	}
-	f.Add(username)
+	c = newCell()
+	g.cells[k] = c
+	return c
 }
 
+func (g *Grid) Get(cellID, category string) *Cell {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if c, ok := g.cells[cellKey(cellID, category)]; ok {
+		return c
+	}
+	return nil
+}
+
+// HasUsers checks if a cell has any users in a given category.
+func (g *Grid) HasUsers(cellID, category string) bool {
+	c := g.Get(cellID, category)
+	if c == nil {
+		return false
+	}
+	return c.HasAny()
+}
+
+// AddUser adds a username to the appropriate cell+category bloom filter.
+func (g *Grid) AddUser(cellID, category, username string) {
+	c := g.getOrCreate(cellID, category)
+	c.Add(username)
+}
+
+// UpdateUser adds the user to all category filters where their score exceeds threshold.
 func (g *Grid) UpdateUser(u *manifest.User) {
 	for _, cat := range manifest.Categories {
 		if u.NeedScores.AboveThreshold(cat) {
@@ -117,34 +174,42 @@ func (g *Grid) UpdateUser(u *manifest.User) {
 	}
 }
 
-// RebuildCell rebuilds all bloom filters for a cell from the users in it.
+// RebuildCell rebuilds all bloom filters for a cell from scratch.
+// Required because bloom filters don't support removal (tsdb rebuilds similarly on cleanup).
 func (g *Grid) RebuildCell(cellID string, users []*manifest.User) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for _, cat := range manifest.Categories {
-		k := key(cellID, cat)
-		f := &Filter{}
+		k := cellKey(cellID, cat)
+		c := newCell()
 		for _, u := range users {
 			if u.NeedScores.AboveThreshold(cat) {
-				f.Add(u.Username)
+				c.filter.Add(fnvHash(u.Username))
+				c.n++
 			}
 		}
-		g.filters[k] = f
+		g.cells[k] = c
 	}
 }
 
+// Persist writes all bloom filters to disk using GOB encoding (tsdb's BackupToDisk pattern).
 func (g *Grid) Persist() error {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	for k, f := range g.filters {
-		path := "bloom/" + k + ".bloom"
-		if err := storage.WriteRaw(path, f.Bytes()); err != nil {
+	for k, c := range g.cells {
+		data, err := c.Encode()
+		if err != nil {
+			return err
+		}
+		path := "bloom/" + k + ".gob"
+		if err := storage.WriteRaw(path, data); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// Load restores all bloom filters from disk (tsdb's LoadBackupFile pattern).
 func (g *Grid) Load() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -154,37 +219,28 @@ func (g *Grid) Load() error {
 	}
 	for _, cellID := range cellDirs {
 		for _, cat := range manifest.Categories {
-			path := "bloom/" + cellID + "/" + cat + ".bloom"
+			path := "bloom/" + cellID + "/" + cat + ".gob"
 			data, err := storage.ReadRaw(path)
 			if err != nil {
 				continue
 			}
-			g.filters[key(cellID, cat)] = FromBytes(data)
+			c := newCell()
+			if err := c.Decode(data); err != nil {
+				continue
+			}
+			g.cells[cellKey(cellID, cat)] = c
 		}
 	}
 	return nil
 }
 
-// EstimateCount gives a rough count of items in a filter (for monitoring).
-func (f *Filter) EstimateCount() int {
-	setBits := 0
-	for _, b := range f.bits {
-		setBits += popcount(b)
+// Stats returns total cells and total items across the grid (for monitoring).
+func (g *Grid) Stats() (cellCount int, itemCount int64) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, c := range g.cells {
+		cellCount++
+		itemCount += c.Count()
 	}
-	if setBits == 0 {
-		return 0
-	}
-	m := float64(filterSize)
-	k := float64(numHashes)
-	n := -(m / k) * math.Log(1-float64(setBits)/m)
-	return int(math.Round(n))
-}
-
-func popcount(b byte) int {
-	count := 0
-	for b != 0 {
-		count += int(b & 1)
-		b >>= 1
-	}
-	return count
+	return
 }

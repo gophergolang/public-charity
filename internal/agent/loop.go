@@ -1,11 +1,13 @@
+// Package agent implements the continuous rule-processing service.
+// Adapted from tsdb patterns:
+// - Background goroutine loop (tsdb's Ingest/BackupToDisk intervals)
+// - Channel-based message submission via Bucket (tsdb's Client.Publish)
+// - Bloom filter triage before manifest reads (tsdb's Period bloom checks)
 package agent
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"sync"
 	"time"
 
@@ -16,26 +18,33 @@ import (
 )
 
 type Agent struct {
-	bloomGrid  *bloom.Grid
-	gatewayURL string
+	bloomGrid *bloom.Grid
+	bucket    *messages.Bucket
 
 	sendCountMu sync.Mutex
 	sendCounts  map[string]int // key: "{biz_id}/{rule_id}/{date}" -> count
 }
 
-func New(bloomGrid *bloom.Grid, gatewayURL string) *Agent {
+// New creates an agent with a channel-based message bucket.
+// The bucket uses tsdb's batchLogs pattern: non-blocking Submit,
+// background flush goroutine on a timer.
+func New(bloomGrid *bloom.Grid, bucket *messages.Bucket) *Agent {
 	return &Agent{
 		bloomGrid:  bloomGrid,
-		gatewayURL: gatewayURL,
+		bucket:     bucket,
 		sendCounts: make(map[string]int),
 	}
 }
 
+// Run starts the agent loop at the given interval.
+// Mirrors tsdb's Ingest goroutine pattern (periodic scan + process).
 func (a *Agent) Run(interval time.Duration) {
 	log.Printf("agent service started (interval: %s)", interval)
-	for {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
 		a.tick()
-		time.Sleep(interval)
 	}
 }
 
@@ -63,9 +72,11 @@ func (a *Agent) tick() {
 }
 
 func (a *Agent) processRule(biz *manifest.Business, rule manifest.BusinessRule) {
+	// BLOOM TRIAGE: check bloom filters for candidate cells.
+	// This mirrors tsdb's approach of checking Period bloom filters before
+	// accessing actual data — skip entire cells in nanoseconds.
 	cells := grid.CellsInRadius(biz.CellID, rule.RadiusCells)
 
-	// Bloom filter triage: which cells have relevant users?
 	var candidateCells []string
 	for _, cellID := range cells {
 		if a.bloomGrid.HasUsers(cellID, rule.Category) {
@@ -77,7 +88,7 @@ func (a *Agent) processRule(biz *manifest.Business, rule manifest.BusinessRule) 
 		return
 	}
 
-	// Read manifests only from candidate cells
+	// Only read manifests from cells that passed the bloom filter
 	var candidates []*manifest.User
 	for _, cellID := range candidateCells {
 		users, err := manifest.ListUsersInCell(cellID)
@@ -101,29 +112,19 @@ func (a *Agent) processRule(biz *manifest.Business, rule manifest.BusinessRule) 
 			continue
 		}
 
+		// Submit to channel-based bucket (non-blocking, tsdb Client.Publish pattern)
 		for _, u := range match.Users {
-			msg := messages.Message{
+			msg := &messages.Message{
 				From:     biz.BizID,
 				Category: rule.Category,
 				Subject:  fmt.Sprintf("Offer from %s", biz.Name),
 				Body:     offerText,
 				RuleID:   rule.ID,
 			}
-			a.sendMessage(u.Username, &msg)
+			a.bucket.Submit(u.Username, msg)
 		}
 		a.incrementSendCount(biz.BizID, rule)
 	}
-}
-
-func (a *Agent) sendMessage(username string, msg *messages.Message) {
-	body, _ := json.Marshal(msg)
-	url := fmt.Sprintf("%s/api/messages/%s", a.gatewayURL, username)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
-	if err != nil {
-		log.Printf("send message to %s: %v", username, err)
-		return
-	}
-	resp.Body.Close()
 }
 
 func (a *Agent) rateLimited(bizID string, rule manifest.BusinessRule) bool {

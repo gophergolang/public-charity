@@ -177,7 +177,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json", http.StatusBadRequest)
 			return
 		}
-		if err := messages.Write(username, &msg); err != nil {
+		if err := messages.WriteSync(username, &msg); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
