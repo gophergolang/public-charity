@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1775684250275,
+      "tag": "0000_zippy_human_robot",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1775770000000,
+      "tag": "0001_timeline_to_availability",
+      "breakpoints": true
+    }
+  ]
+}

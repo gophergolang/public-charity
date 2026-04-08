@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
-import { AUTH_URL, SESSION_COOKIE } from "./env";
+import { createVerify } from "crypto";
+import { SESSION_COOKIE, JWT_PUBLIC_KEY } from "./env";
 
 export type Claims = {
   email: string;
@@ -8,21 +9,40 @@ export type Claims = {
   exp: number;
 };
 
-// Validates the JWT with the auth service. Returns null if invalid/expired.
-export async function currentClaims(): Promise<Claims | null> {
-  const store = await cookies();
-  const c = store.get(SESSION_COOKIE);
-  if (!c) return null;
+// Verifies an RS256 JWT using the public key.
+// The dashboard cannot forge tokens — it only has the public key.
+function verifyJwt(token: string): Claims | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
 
   try {
-    const res = await fetch(`${AUTH_URL}/auth/validate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jwt: c.value }),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as Claims;
+    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString());
+    if (header.alg !== "RS256") return null;
+
+    const verifier = createVerify("RSA-SHA256");
+    verifier.update(parts[0] + "." + parts[1]);
+    const signatureValid = verifier.verify(
+      JWT_PUBLIC_KEY,
+      parts[2],
+      "base64url",
+    );
+    if (!signatureValid) return null;
+
+    const claims = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString(),
+    ) as Claims;
+    if (Date.now() / 1000 > claims.exp) return null;
+
+    return claims;
   } catch {
     return null;
   }
+}
+
+export async function currentClaims(): Promise<Claims | null> {
+  if (!JWT_PUBLIC_KEY) return null;
+  const store = await cookies();
+  const c = store.get(SESSION_COOKIE);
+  if (!c) return null;
+  return verifyJwt(c.value);
 }

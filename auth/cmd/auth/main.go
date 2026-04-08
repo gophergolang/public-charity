@@ -31,7 +31,10 @@ func main() {
 	defer database.Close()
 
 	tokStore := store.New(database)
-	issuer := jwt.NewIssuer(cfg.JWTSecret, time.Duration(cfg.JWTTTLHours)*time.Hour)
+	issuer, err := jwt.NewIssuer(cfg.JWTPrivateKey, time.Duration(cfg.JWTTTLHours)*time.Hour)
+	if err != nil {
+		log.Fatalf("jwt issuer: %v", err)
+	}
 	mailer := email.NewResend(cfg.ResendAPIKey, cfg.EmailFrom)
 	srv := server.New(cfg, tokStore, issuer, mailer)
 

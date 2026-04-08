@@ -6,9 +6,9 @@ import (
 )
 
 type Config struct {
-	Port         string
-	JWTSecret    []byte
-	ResendAPIKey string
+	Port          string
+	JWTPrivateKey []byte
+	ResendAPIKey  string
 	EmailFrom    string
 	DashboardURL string // where magic links land, e.g. https://dashboard.example.com
 	DatabasePath string // SQLite file path, e.g. ./data/auth.db
@@ -17,9 +17,9 @@ type Config struct {
 }
 
 func FromEnv() (*Config, error) {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		return nil, fmt.Errorf("JWT_SECRET is required")
+	privKey := os.Getenv("JWT_PRIVATE_KEY")
+	if privKey == "" {
+		return nil, fmt.Errorf("JWT_PRIVATE_KEY is required (PEM-encoded RSA private key)")
 	}
 	apiKey := os.Getenv("RESEND_API_KEY")
 	if apiKey == "" {
@@ -45,7 +45,7 @@ func FromEnv() (*Config, error) {
 
 	return &Config{
 		Port:         port,
-		JWTSecret:    []byte(secret),
+		JWTPrivateKey: []byte(privKey),
 		ResendAPIKey: apiKey,
 		EmailFrom:    from,
 		DashboardURL: dash,

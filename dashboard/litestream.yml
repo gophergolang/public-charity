@@ -1,0 +1,10 @@
+dbs:
+  - path: /data/dashboard.db
+    replicas:
+      - type: s3
+        bucket: ${BUCKET_NAME}
+        path: dashboard
+        endpoint: ${AWS_ENDPOINT_URL_S3}
+        region: ${AWS_REGION}
+        access-key-id: ${AWS_ACCESS_KEY_ID}
+        secret-access-key: ${AWS_SECRET_ACCESS_KEY}

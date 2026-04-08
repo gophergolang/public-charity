@@ -1,5 +1,6 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { currentClaims } from "@/lib/session";
+import Link from "next/link";
 
 export default async function Home() {
   const claims = await currentClaims();
@@ -7,27 +8,14 @@ export default async function Home() {
   if (!claims) {
     return (
       <main>
-        <h1>Dashboard</h1>
-        <p className="muted">You are not signed in.</p>
+        <h1>Public Charity</h1>
+        <p className="muted">Connecting people who need help with people who can help.</p>
         <p>
-          <Link href="/login">Sign in</Link>
+          <Link href="/login">Sign in to get started</Link>
         </p>
       </main>
     );
   }
 
-  return (
-    <main>
-      <h1>Dashboard</h1>
-      <p>
-        Signed in as <strong>{claims.email}</strong>.
-      </p>
-      <p className="muted">
-        Session expires {new Date(claims.exp * 1000).toLocaleString()}.
-      </p>
-      <form action="/api/auth/logout" method="post">
-        <button type="submit">Sign out</button>
-      </form>
-    </main>
-  );
+  redirect("/dashboard");
 }
