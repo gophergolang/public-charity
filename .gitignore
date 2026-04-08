@@ -1,5 +1,21 @@
-/gateway
-/auth
-/agent
-/data/
+# Go binaries
+/auth/auth
 *.exe
+
+# Runtime data / SQLite
+/auth/data/
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Next.js
+/dashboard/node_modules/
+/dashboard/.next/
+/dashboard/out/
+/dashboard/.env*.local
+
+# Env
+.env
+.env.local

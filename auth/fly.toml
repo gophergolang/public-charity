@@ -1,0 +1,26 @@
+app = "public-charity-auth"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[mounts]
+  source = "auth_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+
+[[http_service.checks]]
+  interval = "10s"
+  timeout = "2s"
+  grace_period = "5s"
+  method = "GET"
+  path = "/health"
+
+[env]
+  PORT = "8080"
+  DATABASE_PATH = "/data/auth.db"
