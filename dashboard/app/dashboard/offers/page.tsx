@@ -1,5 +1,4 @@
 import { getOffers } from "@/lib/actions/offers";
-import { CATEGORIES } from "@/lib/db/schema";
 
 export default async function OffersPage() {
   const offerList = await getOffers();

@@ -20,8 +20,6 @@ export const users = sqliteTable("users", {
   longitude: real("longitude"),
   cellId: text("cell_id"),
   accountType: text("account_type").notNull().default("individual"),
-  onboardingStep: integer("onboarding_step").notNull().default(0),
-  contactPrefs: text("contact_prefs"), // JSON
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
@@ -126,27 +124,9 @@ export const offers = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     category: text("category").notNull(),
     description: text("description").notNull(),
-    available: integer("available").notNull().default(1),
     createdAt: timestamp("created_at").notNull(),
   },
   (t) => [index("idx_offers_user").on(t.userId)],
-);
-
-// ── Surplus ────────────────────────────────────────────────
-
-export const surplus = sqliteTable(
-  "surplus",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    category: text("category").notNull(),
-    description: text("description").notNull(),
-    expiresAt: text("expires_at"),
-    createdAt: timestamp("created_at").notNull(),
-  },
-  (t) => [index("idx_surplus_user").on(t.userId)],
 );
 
 // ── Availability ───────────────────────────────────────────
@@ -164,7 +144,6 @@ export const availability = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     day: text("day").notNull(),
     slot: text("slot").notNull(),
-    note: text("note"),
   },
   (t) => [uniqueIndex("availability_pk").on(t.userId, t.day, t.slot)],
 );

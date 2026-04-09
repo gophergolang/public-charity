@@ -41,7 +41,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /auth/request", s.handleRequest)
 	mux.HandleFunc("POST /auth/verify", s.handleVerify)
-	mux.HandleFunc("POST /auth/validate", s.handleValidate)
 	return withCORS(s.cfg.DashboardURL, mux)
 }
 
@@ -120,22 +119,6 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-	var req struct {
-		JWT string `json:"jwt"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json")
-		return
-	}
-	claims, err := s.issuer.Validate(req.JWT)
-	if err != nil {
-		writeErr(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, claims)
-}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

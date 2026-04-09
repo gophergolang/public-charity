@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PROTECTED = ["/onboarding", "/dashboard"];
+const PROTECTED = ["/dashboard"];
 const SESSION_COOKIE = process.env.SESSION_COOKIE ?? "pc_session";
 
 export function middleware(req: NextRequest) {
@@ -14,5 +14,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/onboarding/:path*", "/dashboard/:path*"],
+  matcher: ["/dashboard/:path*"],
 };

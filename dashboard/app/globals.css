@@ -283,17 +283,6 @@ a:hover { text-decoration: underline; }
 /* ── Offer list ──────────────────────────────────── */
 .offer-list { display: flex; flex-direction: column; gap: 0.75rem; }
 
-/* ── Step forms (onboarding compat) ──────────────── */
-.step-form { }
-.step-nav { display: flex; align-items: center; gap: 1rem; margin-top: 1.5rem; }
-.step-nav .primary { margin-left: auto; }
-.progress-bar { height: 4px; background: #eae6e1; border-radius: 2px; margin-bottom: 0.5rem; }
-.progress-fill { height: 100%; background: #3d3833; border-radius: 2px; transition: width 0.3s; }
-.step-label { margin-bottom: 1.5rem; }
-.needs-list { display: flex; flex-direction: column; gap: 1.25rem; }
-.need-item label { margin-bottom: 0.25rem; }
-.need-item input[type="range"] { width: 100%; margin: 0; }
-.range-labels { display: flex; justify-content: space-between; font-size: 0.7rem; color: #999; }
 
 /* ── Mobile ──────────────────────────────────────── */
 @media (max-width: 640px) {

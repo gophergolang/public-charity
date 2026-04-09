@@ -15,6 +15,13 @@
       "when": 1775770000000,
       "tag": "0001_timeline_to_availability",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1775860000000,
+      "tag": "0002_cleanup",
+      "breakpoints": true
     }
   ]
 }
