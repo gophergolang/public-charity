@@ -1,0 +1,16 @@
+app = "public-charity-agent"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# No HTTP service — this is a background worker.
+# Fly keeps it running as a "machine" without a public endpoint.
+
+[env]
+  MATCH_INTERVAL = "4h"
+  DATA_DIR = "/data"
+
+[mounts]
+  source = "agent_data"
+  destination = "/data"

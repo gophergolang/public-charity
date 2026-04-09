@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { db } from "@/lib/db";
 import { users, messages } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -6,13 +7,20 @@ import { forwardToEmail } from "@/lib/email/forward";
 
 const API_KEY = process.env.DASHBOARD_API_KEY;
 
+function checkAuth(req: NextRequest): boolean {
+  if (!API_KEY) return false;
+  const header = req.headers.get("authorization") ?? "";
+  const expected = `Bearer ${API_KEY}`;
+  if (header.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(header), Buffer.from(expected));
+}
+
 export async function POST(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (!API_KEY || authHeader !== `Bearer ${API_KEY}`) {
+  if (!checkAuth(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const body = (await req.json()) as {
+  let body: {
     recipient_email: string;
     sender_type?: string;
     category?: string;
@@ -20,6 +28,11 @@ export async function POST(req: NextRequest) {
     body: string;
     rule_id?: string;
   };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+  }
 
   if (!body.recipient_email || !body.subject || !body.body) {
     return NextResponse.json(
@@ -50,7 +63,6 @@ export async function POST(req: NextRequest) {
     .returning()
     .get();
 
-  // Forward to email.
   const sent = await forwardToEmail(user.email, body.subject, body.body);
   if (sent) {
     db.update(messages)
